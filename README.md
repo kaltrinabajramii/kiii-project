@@ -4,8 +4,8 @@ A CRUD-based web application for managing bus tickets and bus lines. Passengers 
 
 ## Architecture
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React 18 + TypeScript + Vite |
-| Backend | Spring Boot 3.2 (Java 17), REST API |
-| Database | PostgreSQL 16 |
+| Layer | Technology                            |
+|-------|---------------------------------------|
+| Frontend | React 18 + TypeScript + Vite          |
+| Backend | Spring Boot 4.0.1 (Java 21), REST API |
+| Database | PostgreSQL 16                         |
