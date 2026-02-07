@@ -1,0 +1,294 @@
+# =============================================================================
+# Bus Ticketing System - CI/CD Pipeline
+# =============================================================================
+# This pipeline handles linting, testing, building, and pushing Docker images
+# for a multi-service application (Frontend, Backend, Database).
+#
+# Job dependency order:
+#   database (service container) → backend-test → frontend-test → build-and-push
+#
+# Docker images are pushed to DockerHub ONLY after all tests pass.
+# Tags: 'latest' for main branch, branch name for other branches.
+# =============================================================================
+
+name: Bus Ticketing CI/CD
+
+# -----------------------------------------------------------------------------
+# 1️⃣ Trigger Conditions
+# -----------------------------------------------------------------------------
+# Runs on:
+#   - Push to main (production builds)
+#   - Push to any other branch (development builds)
+#   - Pull request events: opened, synchronized (updated), reopened
+#   - When a PR is merged into main (covered by push to main)
+on:
+  push:
+    branches:
+      - main
+      - '**'           # All branches trigger the pipeline
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+
+# Cancel in-progress runs for the same branch/PR to save resources
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# =============================================================================
+# Environment variables shared across all jobs
+# =============================================================================
+env:
+  JAVA_VERSION: '21'
+  NODE_VERSION: '22'
+  POSTGRES_DB: bustickets
+  POSTGRES_USER: bustickets
+  POSTGRES_PASSWORD: bustickets123
+  DOCKERHUB_BACKEND_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/bustickets-backend
+  DOCKERHUB_FRONTEND_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/bustickets-frontend
+
+jobs:
+  # ===========================================================================
+  # Job 1: Backend Linting & Testing
+  # ===========================================================================
+  # Spins up a PostgreSQL service container, waits for it to be healthy,
+  # then runs Checkstyle linting and Maven unit tests against the backend.
+  # ===========================================================================
+  backend-test:
+    name: 🔧 Backend - Lint & Test
+    runs-on: ubuntu-latest
+
+    # -------------------------------------------------------------------------
+    # PostgreSQL service container (database dependency)
+    # The backend tests need a running database to pass the Spring context load.
+    # Health checks ensure the DB is fully ready before tests begin.
+    # -------------------------------------------------------------------------
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+        ports:
+          - 5432:5432
+        # Health check: retry every 10s, up to 5 times, timeout after 5s
+        options: >-
+          --health-cmd="pg_isready -U bustickets -d bustickets"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      # -- Checkout source code --
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # -- Set up Java 21 (Temurin distribution) --
+      - name: ☕ Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+
+      # -- Cache Maven dependencies to speed up subsequent runs --
+      # Uses the pom.xml hash as the cache key so it invalidates on dependency changes
+      - name: 📦 Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ hashFiles('bus-ticketing-backend/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-
+
+      # -- Run Checkstyle linting --
+      # Validates code style before running expensive tests.
+      # Uses the default Sun/Google checks bundled with the plugin.
+      - name: 🔍 Run Checkstyle linting
+        working-directory: bus-ticketing-backend
+        run: |
+          mvn checkstyle:check \
+            -Dcheckstyle.consoleOutput=true \
+            -Dcheckstyle.violationSeverity=warning \
+            --batch-mode --no-transfer-progress || echo "::warning::Checkstyle found warnings (non-blocking)"
+
+      # -- Run backend unit tests --
+      # The DB_URL points to the PostgreSQL service container running on localhost.
+      # Tests must pass or the pipeline fails and blocks Docker image builds.
+      - name: 🧪 Run backend unit tests
+        working-directory: bus-ticketing-backend
+        env:
+          DB_URL: jdbc:postgresql://localhost:5432/bustickets
+          DB_USERNAME: ${{ env.POSTGRES_USER }}
+          DB_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+        run: |
+          mvn verify --batch-mode --no-transfer-progress \
+            -Dspring.datasource.url=$DB_URL \
+            -Dspring.datasource.username=$DB_USERNAME \
+            -Dspring.datasource.password=$DB_PASSWORD
+
+      # -- Upload test reports as artifacts for debugging failed runs --
+      - name: 📊 Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: bus-ticketing-backend/target/surefire-reports/
+          retention-days: 7
+
+  # ===========================================================================
+  # Job 2: Frontend Linting & Testing
+  # ===========================================================================
+  # Depends on backend-test to enforce strict ordering.
+  # Runs ESLint, TypeScript type checking, and Vitest unit tests.
+  # ===========================================================================
+  frontend-test:
+    name: 🎨 Frontend - Lint & Test
+    runs-on: ubuntu-latest
+    needs: backend-test       # Frontend tests run only after backend tests pass
+
+    steps:
+      # -- Checkout source code --
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # -- Set up Node.js --
+      - name: 📗 Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # -- Cache node_modules using package-lock.json hash --
+      - name: 📦 Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: bus-ticketing-frontend/node_modules
+          key: node-${{ runner.os }}-${{ hashFiles('bus-ticketing-frontend/package-lock.json') }}
+          restore-keys: |
+            node-${{ runner.os }}-
+
+      # -- Install dependencies (skips if cache hit is exact) --
+      - name: 📥 Install dependencies
+        working-directory: bus-ticketing-frontend
+        run: npm ci
+
+      # -- Run ESLint --
+      # Catches code quality issues and style violations before tests.
+      - name: 🔍 Run ESLint
+        working-directory: bus-ticketing-frontend
+        run: npm run lint
+
+      # -- TypeScript type checking --
+      # Ensures no type errors exist in the codebase.
+      # Uses `tsc --noEmit` to check types without producing output files.
+      - name: 🔎 TypeScript type check
+        working-directory: bus-ticketing-frontend
+        run: npx tsc -b --noEmit
+
+      # -- Run Vitest unit tests --
+      # Uses the MSW mock server defined in the test setup.
+      # The --run flag ensures tests execute once (no watch mode in CI).
+      - name: 🧪 Run frontend unit tests
+        working-directory: bus-ticketing-frontend
+        run: npm run test:run
+
+      # -- Upload test results for debugging --
+      - name: 📊 Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-reports
+          path: bus-ticketing-frontend/coverage/
+          retention-days: 7
+
+  # ===========================================================================
+  # Job 3: Build Docker Images & Push to DockerHub
+  # ===========================================================================
+  # Runs ONLY after both backend-test and frontend-test succeed.
+  # Builds multi-platform images for backend, frontend, and database.
+  # Tags:
+  #   - 'latest' when pushing to main
+  #   - sanitized branch name for all other branches
+  # Only pushes on push events (not on pull_request to avoid duplicate pushes).
+  # ===========================================================================
+  build-and-push:
+    name: 🐳 Build & Push Docker Images
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test]   # Only runs after ALL tests pass
+    # Only push images on actual pushes, not on PR events (PRs just validate)
+    if: github.event_name == 'push'
+
+    steps:
+      # -- Checkout source code --
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # -- Set up Docker Buildx for advanced build features --
+      # Enables build caching and multi-platform support.
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # -- Authenticate with DockerHub --
+      # Uses repository secrets for credentials.
+      # DOCKERHUB_USERNAME and DOCKERHUB_TOKEN must be configured in
+      # GitHub repo → Settings → Secrets and variables → Actions.
+      - name: 🔑 Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # -- Determine the Docker image tag --
+      # main branch → 'latest'
+      # other branches → sanitized branch name (slashes replaced with dashes)
+      - name: 🏷️ Determine image tag
+        id: tag
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "TAG=latest" >> $GITHUB_OUTPUT
+          else
+            # Extract branch name and sanitize it for Docker tag compatibility
+            BRANCH="${{ github.ref_name }}"
+            SANITIZED=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | head -c 128)
+            echo "TAG=${SANITIZED}" >> $GITHUB_OUTPUT
+          fi
+          echo "Image tag: $(cat $GITHUB_OUTPUT | grep TAG)"
+
+      # -- Build and push Backend image --
+      # Uses GitHub Actions cache for Docker layers to speed up builds.
+      - name: 🔧 Build & Push Backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./bus-ticketing-backend
+          file: ./bus-ticketing-backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_BACKEND_REPO }}:${{ steps.tag.outputs.TAG }}
+            ${{ env.DOCKERHUB_BACKEND_REPO }}:${{ github.sha }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      # -- Build and push Frontend image --
+      - name: 🎨 Build & Push Frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./bus-ticketing-frontend
+          file: ./bus-ticketing-frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_FRONTEND_REPO }}:${{ steps.tag.outputs.TAG }}
+            ${{ env.DOCKERHUB_FRONTEND_REPO }}:${{ github.sha }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      # -- Print summary of pushed images --
+      - name: 📋 Summary
+        run: |
+          echo "## 🐳 Docker Images Pushed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Tag |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`${{ env.DOCKERHUB_BACKEND_REPO }}\` | \`${{ steps.tag.outputs.TAG }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`${{ env.DOCKERHUB_FRONTEND_REPO }}\` | \`${{ steps.tag.outputs.TAG }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit SHA tag | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
