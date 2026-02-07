@@ -1,0 +1,7 @@
+FROM postgres:16-alpine
+
+ENV POSTGRES_DB=bustickets
+ENV POSTGRES_USER=bustickets
+ENV POSTGRES_PASSWORD=bustickets123
+
+EXPOSE 5432
