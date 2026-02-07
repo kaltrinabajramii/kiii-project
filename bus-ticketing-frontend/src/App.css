@@ -1,42 +1,133 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f7fa;
+    color: #333;
+    line-height: 1.5;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
-}
+.app { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* Nav */
+nav {
+    background: #2563eb;
+    padding: 0 20px;
+    display: flex;
+    gap: 0;
+    align-items: stretch;
+    box-shadow: 0 2px 4px rgba(0,0,0,.1);
 }
-
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+nav a {
+    color: #fff;
+    text-decoration: none;
+    padding: 14px 18px;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background .15s;
 }
+nav a:hover, nav a.active { background: rgba(255,255,255,.15); }
+nav .brand { font-weight: 700; font-size: 16px; margin-right: auto; }
 
+/* Cards & Containers */
 .card {
-  padding: 2em;
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    margin-bottom: 16px;
 }
 
-.read-the-docs {
-  color: #888;
+h1 { font-size: 24px; margin: 24px 0 16px; }
+h2 { font-size: 20px; margin: 20px 0 12px; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; }
+th { background: #f9fafb; font-weight: 600; font-size: 13px; text-transform: uppercase; color: #6b7280; }
+tr:hover td { background: #f9fafb; }
+
+/* Buttons */
+.btn {
+    display: inline-block;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: 500;
+    transition: opacity .15s;
 }
+.btn:hover { opacity: .85; }
+.btn-primary { background: #2563eb; color: #fff; }
+.btn-success { background: #16a34a; color: #fff; }
+.btn-danger { background: #dc2626; color: #fff; }
+.btn-secondary { background: #6b7280; color: #fff; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+.btn-group { display: flex; gap: 6px; }
+
+/* Forms */
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; color: #374151; }
+.form-group input, .form-group select, .form-group textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 14px;
+}
+.form-group input:focus, .form-group select:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37,99,235,.1);
+}
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* Badges */
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.badge-green { background: #dcfce7; color: #166534; }
+.badge-yellow { background: #fef9c3; color: #854d0e; }
+.badge-red { background: #fecaca; color: #991b1b; }
+.badge-gray { background: #f3f4f6; color: #6b7280; }
+
+/* Route list */
+.route-list { list-style: none; padding: 0; }
+.route-list li {
+    padding: 8px 12px;
+    border-left: 3px solid #2563eb;
+    margin-bottom: 4px;
+    background: #f9fafb;
+    border-radius: 0 4px 4px 0;
+}
+.route-list .order { font-weight: 700; color: #2563eb; margin-right: 8px; }
+
+/* Alert */
+.alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }
+.alert-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.alert-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+
+/* Misc */
+.text-muted { color: #9ca3af; font-size: 13px; }
+.mt-8 { margin-top: 8px; }
+.mt-16 { margin-top: 16px; }
+.mb-16 { margin-bottom: 16px; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.pagination { display: flex; gap: 8px; align-items: center; margin-top: 16px; justify-content: center; }
+
+/* Modal overlay */
+.modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.4);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+}
+.modal { background: #fff; border-radius: 10px; padding: 24px; width: 480px; max-width: 90vw; }
+.modal h2 { margin-top: 0; }

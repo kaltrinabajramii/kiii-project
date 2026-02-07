@@ -1,35 +1,35 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { Routes, Route, NavLink } from 'react-router-dom'
+import Home from './pages/Home'
+import BusLines from './pages/BusLines'
+import BusLineDetail from './pages/BusLineDetail'
+import BusStops from './pages/BusStops'
+import TicketCategories from './pages/TicketCategories'
+import BuyTicket from './pages/BuyTicket'
+import MyTickets from './pages/MyTickets.tsx'
 
-function App() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+export default function App() {
+    return (
+        <>
+            <nav>
+                <NavLink to="/" className="brand">🚌 BusTickets</NavLink>
+                <NavLink to="/">Home</NavLink>
+                <NavLink to="/bus-lines">Bus Lines</NavLink>
+                <NavLink to="/bus-stops">Bus Stops</NavLink>
+                <NavLink to="/ticket-categories">Categories</NavLink>
+                <NavLink to="/buy-ticket">Buy Ticket</NavLink>
+                <NavLink to="/my-tickets">My Tickets</NavLink>
+            </nav>
+            <div className="app">
+                <Routes>
+                    <Route path="/" element={<Home />} />
+                    <Route path="/bus-lines" element={<BusLines />} />
+                    <Route path="/bus-lines/:id" element={<BusLineDetail />} />
+                    <Route path="/bus-stops" element={<BusStops />} />
+                    <Route path="/ticket-categories" element={<TicketCategories />} />
+                    <Route path="/buy-ticket" element={<BuyTicket />} />
+                    <Route path="/my-tickets" element={<MyTickets />} />
+                </Routes>
+            </div>
+        </>
+    )
 }
-
-export default App
