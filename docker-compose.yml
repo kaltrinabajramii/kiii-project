@@ -1,0 +1,50 @@
+services:
+  database:
+    build:
+      context: ./database
+    container_name: bustickets-db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - bustickets-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bustickets -d bustickets"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./bus-ticketing-backend
+    container_name: bustickets-backend
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:postgresql://database:5432/bustickets
+      DB_USERNAME: bustickets
+      DB_PASSWORD: bustickets123
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - bustickets-net
+
+  frontend:
+    build:
+      context: ./bus-ticketing-frontend
+    container_name: bustickets-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - bustickets-net
+
+volumes:
+  pgdata:
+
+networks:
+  bustickets-net:
+    driver: bridge
