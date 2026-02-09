@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bus-ticketing
+  labels:
+    app.kubernetes.io/part-of: bus-ticketing-system
+    project: bus-ticketing

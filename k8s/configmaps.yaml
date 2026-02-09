@@ -1,0 +1,82 @@
+# ============================================================
+# PostgreSQL ConfigMap — non-sensitive database configuration
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: bus-ticketing
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: bus-ticketing-system
+data:
+  POSTGRES_DB: "bustickets"
+  POSTGRES_MAX_CONNECTIONS: "100"
+  POSTGRES_SHARED_BUFFERS: "64MB"
+
+---
+# ============================================================
+# Backend ConfigMap — Spring Boot application configuration
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: bus-ticketing
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: bus-ticketing-system
+data:
+  DB_URL: "jdbc:postgresql://postgres-headless.bus-ticketing.svc.cluster.local:5432/bustickets"
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
+  SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: "org.hibernate.dialect.PostgreSQLDialect"
+  SERVER_PORT: "8080"
+  SPRING_JPA_OPEN_IN_VIEW: "false"
+
+---
+# ============================================================
+# Frontend ConfigMap — Nginx configuration
+# Proxies /api/ requests to the backend Kubernetes service
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-nginx-config
+  namespace: bus-ticketing
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/component: web
+    app.kubernetes.io/part-of: bus-ticketing-system
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # SPA fallback
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        # Proxy API calls to backend K8s service
+        location /api/ {
+            proxy_pass http://backend-service.bus-ticketing.svc.cluster.local:8080;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 30s;
+        }
+
+        # Health check endpoint for probes
+        location /healthz {
+            access_log off;
+            return 200 'ok';
+            add_header Content-Type text/plain;
+        }
+    }

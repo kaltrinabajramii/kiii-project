@@ -1,16 +1,19 @@
 services:
   database:
-    build:
-      context: ./database
+    image: postgres:16-alpine
     container_name: bustickets-db
     ports:
       - "5433:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
       - bustickets-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bustickets -d bustickets"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -22,9 +25,9 @@ services:
     ports:
       - "8080:8080"
     environment:
-      DB_URL: jdbc:postgresql://database:5432/bustickets
-      DB_USERNAME: bustickets
-      DB_PASSWORD: bustickets123
+      DB_URL: jdbc:postgresql://database:5432/${POSTGRES_DB}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
     depends_on:
       database:
         condition: service_healthy
