@@ -1,0 +1,51 @@
+services:
+  database:
+    image: postgres:16-alpine
+    container_name: bustickets-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - bustickets-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    image: ${DOCKERHUB_USERNAME}/bustickets-backend:${BRANCH_NAME}-latest
+    container_name: bustickets-backend
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:postgresql://database:5432/${POSTGRES_DB}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - bustickets-net
+
+  frontend:
+    image: ${DOCKERHUB_USERNAME}/bustickets-frontend:${BRANCH_NAME}-latest
+    container_name: bustickets-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - bustickets-net
+
+volumes:
+  pgdata:
+
+networks:
+  bustickets-net:
+    driver: bridge

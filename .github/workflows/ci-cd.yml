@@ -3,14 +3,14 @@ name: Bus Ticketing CI/CD
 on:
   push:
     branches:
-      - main
+      - cd-deploy
 
 env:
   JAVA_VERSION: '21'
   NODE_VERSION: '22'
 
 jobs:
-  # Backend: lint and test
+  # Backend: lint and test (runs on all branches)
   backend-test:
     name: Backend - Lint & Test
     runs-on: ubuntu-latest
@@ -65,7 +65,7 @@ jobs:
             -Dspring.datasource.username=$DB_USERNAME \
             -Dspring.datasource.password=$DB_PASSWORD
 
-  # Frontend: lint and test
+  # Frontend: lint and test (runs on all branches)
   frontend-test:
     name: Frontend - Lint & Test
     runs-on: ubuntu-latest
@@ -94,23 +94,147 @@ jobs:
         working-directory: bus-ticketing-frontend
         run: npm run test:run
 
-  # Build and push Docker images to DockerHub
+  # Build and push Docker images (runs on all branches)
   build-and-push:
     name: Build & Push Docker Images
     runs-on: ubuntu-latest
     needs: [backend-test, frontend-test]
+    outputs:
+      branch_name: ${{ steps.vars.outputs.branch_name }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set branch name
+        id: vars
+        run: echo "branch_name=$(echo ${{ github.ref_name }} | tr '/' '-')" >> "$GITHUB_OUTPUT"
 
       - name: Login to DockerHub
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
       - name: Build and push backend image
         run: |
-          docker build --pull -t ${{ secrets.DOCKERHUB_USERNAME }}/bustickets-backend:latest ./bus-ticketing-backend
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/bustickets-backend:latest
+          docker build --pull -t ${{ secrets.DOCKERHUB_USERNAME }}/bustickets-backend:${{ steps.vars.outputs.branch_name }}-latest ./bus-ticketing-backend
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/bustickets-backend:${{ steps.vars.outputs.branch_name }}-latest
 
       - name: Build and push frontend image
         run: |
-          docker build --pull -t ${{ secrets.DOCKERHUB_USERNAME }}/bustickets-frontend:latest ./bus-ticketing-frontend
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/bustickets-frontend:latest
+          docker build --pull -t ${{ secrets.DOCKERHUB_USERNAME }}/bustickets-frontend:${{ steps.vars.outputs.branch_name }}-latest ./bus-ticketing-frontend
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/bustickets-frontend:${{ steps.vars.outputs.branch_name }}-latest
+
+  # ============================================================
+  # CD JOBS — only run on cd-deploy branch
+  # ============================================================
+
+  aws-instance-prep:
+    name: Prepare AWS EC2 Instance
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/cd-deploy'
+    outputs:
+      instance_id: ${{ steps.set_env.outputs.instance_id }}
+      public_ip: ${{ steps.get_ip.outputs.public_ip }}
+    steps:
+      - name: Set branch name
+        run: echo "BRANCH_NAME=${{ needs.build-and-push.outputs.branch_name }}" >> "$GITHUB_ENV"
+
+      - name: Configure AWS Credentials
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set default.region ${{ secrets.AWS_REGION }}
+
+      - name: Check for existing EC2 instance
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=bustickets-${{ env.BRANCH_NAME }}" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)
+
+          if [[ "$INSTANCE_ID" == "None" ]]; then
+            echo "EXISTING_INSTANCE=false" >> $GITHUB_ENV
+          else
+            echo "EXISTING_INSTANCE=true" >> $GITHUB_ENV
+            echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+          fi
+
+      - name: Launch EC2 Instance if needed
+        if: env.EXISTING_INSTANCE == 'false'
+        run: |
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --launch-template LaunchTemplateId=${{ secrets.EC2_LAUNCH_TEMPLATE_ID }} \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=bustickets-${{ env.BRANCH_NAME }}}]" \
+            --query 'Instances[0].InstanceId' \
+            --output text)
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+
+      - name: Wait for instance to be ready
+        run: |
+          echo "Waiting for EC2 (${{ env.INSTANCE_ID }}) to be ready..."
+          aws ec2 wait instance-status-ok --instance-ids ${{ env.INSTANCE_ID }}
+          echo "Instance is ready."
+
+      - name: Get EC2 Public IP
+        id: get_ip
+        run: |
+          PUBLIC_IP=$(aws ec2 describe-instances \
+            --instance-ids ${{ env.INSTANCE_ID }} \
+            --query "Reservations[0].Instances[0].PublicIpAddress" \
+            --output text)
+          echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+
+      - name: Set instance ID output
+        id: set_env
+        run: echo "instance_id=${{ env.INSTANCE_ID }}" >> $GITHUB_OUTPUT
+
+      - name: Print deployment info
+        run: |
+          echo "============================================"
+          echo "✅ EC2 Instance is ready!"
+          echo "🌍 App will be available at: http://${{ steps.get_ip.outputs.public_ip }}"
+          echo "============================================"
+
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: [build-and-push, aws-instance-prep]
+    if: github.ref == 'refs/heads/cd-deploy'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH Key
+        run: |
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ec2_key.pem
+          chmod 600 ec2_key.pem
+
+      - name: Copy docker-compose.prod.yml to EC2
+        run: |
+          scp -i ec2_key.pem -o StrictHostKeyChecking=no \
+            docker-compose.prod.yml \
+            ec2-user@${{ needs.aws-instance-prep.outputs.public_ip }}:/home/ec2-user/docker-compose.yml
+
+      - name: Deploy with docker-compose
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          BRANCH_NAME: ${{ needs.build-and-push.outputs.branch_name }}
+        run: |
+          ssh -i ec2_key.pem -o StrictHostKeyChecking=no ec2-user@${{ needs.aws-instance-prep.outputs.public_ip }} "
+            echo 'DB_PASSWORD=${DB_PASSWORD}' > /home/ec2-user/.env &&
+            echo 'DB_USERNAME=${DB_USERNAME}' >> /home/ec2-user/.env &&
+            echo 'POSTGRES_DB=${POSTGRES_DB}' >> /home/ec2-user/.env &&
+            echo 'DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}' >> /home/ec2-user/.env &&
+            echo 'BRANCH_NAME=${BRANCH_NAME}' >> /home/ec2-user/.env &&
+            cd /home/ec2-user &&
+            docker-compose --env-file .env pull &&
+            docker-compose --env-file .env down || true &&
+            docker-compose --env-file .env up -d
+          "
+
+      - name: Print deployment URL
+        run: |
+          echo "============================================"
+          echo "🚀 Deployment complete!"
+          echo "🌍 App: http://${{ needs.aws-instance-prep.outputs.public_ip }}"
+          echo "============================================"
