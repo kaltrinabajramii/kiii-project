@@ -158,7 +158,7 @@ jobs:
         run: |
           INSTANCE_ID=$(aws ec2 run-instances \
             --launch-template LaunchTemplateId=${{ secrets.EC2_LAUNCH_TEMPLATE_ID }} \
-            --instance-type t2.micro \
+            --instance-type t3.micro \
             --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=bustickets-${{ env.BRANCH_NAME }}}]" \
             --query 'Instances[0].InstanceId' \
             --output text)
